@@ -1,11 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
 [package]
 name = "busbar-auth-admin-tokens"
-version = "1.5.0"
-publish = false            # internal workspace crate; never goes to crates.io
-edition = "2021"
-rust-version = "1.97"
+version = "1.6.0"
+publish.workspace = true  # linked into busbar at a pinned rev, or shipped as a signed tarball; never to crates.io
+edition.workspace = true
+rust-version.workspace = true
 description = "The built-in `admin-tokens` admin-auth plugin for busbar: the single operator admin token, compared in constant time across both carriers."
-license = "Apache-2.0"
+license.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+# rlib only: the logic and its door. A build that LINKS this crate registers `door::door` as its
+# `admin-tokens` row (no symbol is exported from here); the dropped-in cdylib is
+# `busbar-auth-admin-tokens-plugin` (same repo), which exports the same door as `busbar_plugin_door`.
+crate-type = ["rlib"]
 
 [dependencies]
-busbar-api = { path = "../api" }
+# The one busbar crate this plugin names (#40: a plugin depends on the contract only), pinned to the
+# rev in the repo's `.busbar-ref`.
+busbar-contract = { workspace = true }
+tracing = { workspace = true }
+# Wipes the presented token's digest after the compare.
+zeroize = { workspace = true }
+
+[dev-dependencies]
+
+busbar-plugin-loader = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt"] }
+# The settings tests check the hand decoder against a real JSON parser.
+serde_json = { workspace = true }

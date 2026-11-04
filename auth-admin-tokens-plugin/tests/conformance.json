@@ -1,0 +1,23 @@
+{
+  "settings": "\"da516aa0bded618a0a9b3b692c50bd1644e0aeec56dde3d086148c8f2a19d335\"",
+  "auth": {
+    "bad_settings": ["\"the-raw-token\"", "[1]"],
+    "rotated_settings": "\"2f2e838152360aa9db3203e7df02d7cffde7fc77f58039ce31194e06e7674420\"",
+    "cases": [
+      { "credential": null, "lines": { "authorization": "Bearer the-operator-token" }, "verdict": "identity:admin" },
+      { "credential": null, "lines": { "x-admin-token": "the-operator-token" }, "verdict": "identity:admin" },
+      { "credential": null, "lines": { "authorization": "Bearer the-operator-token", "x-admin-token": "the-operator-token" }, "verdict": "identity:admin" },
+      { "credential": null, "lines": { "authorization": "Bearer not-the-token", "x-admin-token": "the-operator-token" }, "verdict": "identity:admin" },
+      { "credential": null, "lines": { "authorization": "Bearer not-the-token" }, "verdict": "reject" },
+      { "credential": null, "lines": { "x-admin-token": "not-the-token" }, "verdict": "reject" },
+      { "credential": null, "lines": { "authorization": "Bearer aaa.bbb.ccc" }, "verdict": "reject" },
+      { "credential": null, "lines": { "x-admin-token": "aaa.bbb.ccc" }, "verdict": "reject" },
+      { "credential": null, "lines": { "x-admin-token": "" }, "verdict": "pass" },
+      { "credential": null, "lines": { "x-admin-token": "t\u00f6k\u00e9n" }, "verdict": "pass" },
+      { "credential": null, "lines": { "authorization": "Bearer t\u00f6k\u00e9n" }, "verdict": "pass" },
+      { "credential": null, "lines": { "authorization": "Bearer aaa.bbb.ccc", "x-admin-token": "not-the-token" }, "verdict": "reject" },
+      { "credential": null, "lines": {}, "verdict": "pass" }
+    ],
+    "never_echoed": ["the-operator-token", "the-raw-token", "not-the-token"]
+  }
+}

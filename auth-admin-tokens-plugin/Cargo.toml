@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+[package]
+name = "busbar-auth-admin-tokens-plugin"
+version = "1.6.0"
+publish.workspace = true  # first-party signed cdylib, shipped as a packed/signed tarball, not to crates.io
+edition.workspace = true
+rust-version.workspace = true
+description = "First-party signed kind:auth plugin cdylib: the built-in admin-tokens admin-auth module (the single operator admin token, compared in constant time), packaged as a droppable busbar plugin."
+license.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+# cdylib: the DROPPED-IN door (a signed tarball in `plugins/`), exporting `busbar_plugin_door`.
+# rlib: what `cargo test` links, and what a loader test depends on to have the cdylib built.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# THE LOGIC, same repo: its `door::door` is the door this image exports.
+busbar-auth-admin-tokens = { path = "../auth-admin-tokens" }
+busbar-contract = { workspace = true }
+
+[dev-dependencies]
+# The conformance test loads the built cdylib over the REAL loader (sign, pack, scan, open) and the
+# linked door through the same registry — dev-only, never in the shipped artifact. Same pinned rev as
+# the logic crate's busbar-contract, so one busbar source resolves.
+busbar-plugin-loader = { workspace = true, features = ["test-support"] }
+# `test-seal`: the contract's dev-only TestKernelSeal, lent to the tests' dispatcher as the
+# composition root lends the kernel's, so a verify reveals the credential lines it lends the door.
+busbar-contract = { workspace = true, features = ["test-seal"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+libloading = { workspace = true }
