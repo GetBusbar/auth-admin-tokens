@@ -53,8 +53,8 @@ fn a_jws_shaped_configured_token_identifies() {
         other => panic!("expected Identity, got {other:?}"),
     }
     let settings = format!("\"{h}\"");
-    let plugin =
-        <AdminTokens as VerifyPlugin>::open(settings.as_bytes(), &[]).expect("a digest opens");
+    let plugin = <AdminTokens as VerifyPlugin>::open_refusing(settings.as_bytes(), &[])
+        .expect("a digest opens");
     match authenticate_admin_tokens(Some(&plugin.digest()), Some(token), None) {
         Verdict::Identity(p) => assert_eq!(p.subject, ADMIN_TOKENS_PRINCIPAL_ID),
         other => panic!("expected Identity, got {other:?}"),
@@ -139,10 +139,10 @@ fn open_refuses_settings_that_are_not_a_sha256_hex_digest() {
         h.clone(),
         format!("{{\"token\":\"{h}\"}}"),
     ] {
-        let err = <AdminTokens as VerifyPlugin>::open(settings.as_bytes(), &[])
+        let err = <AdminTokens as VerifyPlugin>::open_refusing(settings.as_bytes(), &[])
             .err()
             .unwrap_or_else(|| panic!("{settings:?} opened"));
-        assert_eq!(err, NOT_A_DIGEST);
+        assert_eq!(err, Refusal::failed(NOT_A_DIGEST));
     }
 }
 
@@ -153,12 +153,12 @@ fn open_refuses_the_digest_of_an_empty_token() {
     assert_eq!(hash(""), d);
     for digest in [d.to_string(), d.to_ascii_uppercase(), format!(" {d}\\n")] {
         let settings = format!("\"{digest}\"");
-        let err = <AdminTokens as VerifyPlugin>::open(settings.as_bytes(), &[])
+        let err = <AdminTokens as VerifyPlugin>::open_refusing(settings.as_bytes(), &[])
             .err()
             .unwrap_or_else(|| panic!("{settings:?} opened"));
-        assert_eq!(err, EMPTY_TOKEN);
-        assert!(err.contains("empty token"), "{err}");
-        assert!(!err.to_ascii_lowercase().contains(d), "{err}");
+        assert_eq!(err, Refusal::failed(EMPTY_TOKEN));
+        assert!(err.to_string().contains("empty token"), "{err}");
+        assert!(!err.to_string().to_ascii_lowercase().contains(d), "{err}");
     }
 }
 
@@ -167,7 +167,8 @@ fn open_refuses_the_digest_of_an_empty_token() {
 fn open_takes_the_digest_trimmed_in_either_case() {
     let h = hash("secret");
     let settings = format!("\"  {}\\n\"", h.to_ascii_uppercase());
-    let plugin = <AdminTokens as VerifyPlugin>::open(settings.as_bytes(), &[]).expect("opens");
+    let plugin =
+        <AdminTokens as VerifyPlugin>::open_refusing(settings.as_bytes(), &[]).expect("opens");
     assert_eq!(plugin.digest().as_str(), h);
 }
 
@@ -204,32 +205,32 @@ fn the_bearer_is_read_off_the_authorization_line() {
     );
 }
 
-/// 1.5.5's `extract_bearer_token` was `split_once(' ')` with the token kept as-is: the split is on
+/// Bearer consumes the RFC 6750 ASCII-space separator run, not arbitrary token whitespace.
 #[test]
-fn the_bearer_split_is_the_first_single_space_and_the_token_is_verbatim() {
-    assert_eq!(
-        bearer_token(b"Bearer  secret"),
-        Some(" secret"),
-        "the token keeps its leading space"
-    );
-    assert_eq!(bearer_token(b"Bearer a b"), Some("a b"));
-    assert_eq!(
-        bearer_token(b"Bearer\tsecret"),
-        None,
-        "a tab is not the separator"
-    );
-    assert_eq!(
-        bearer_token(b" Bearer secret"),
-        None,
-        "a leading space makes the scheme empty"
-    );
+fn the_bearer_consumes_the_scheme_separator_and_preserves_token_bytes() {
     let h = hash("secret");
-    assert!(
-        matches!(
-            authenticate_admin_tokens(Some(&h), bearer_token(b"Bearer  secret"), None),
-            Verdict::Reject
-        ),
-        "the untrimmed token is a different credential: it is rejected"
+    for value in ["Bearer secret", "Bearer  secret", "bEaReR    secret"] {
+        assert_eq!(bearer_token(value.as_bytes()), Some("secret"));
+        assert!(matches!(
+            authenticate_admin_tokens(Some(&h), bearer_token(value.as_bytes()), None),
+            Verdict::Identity(_)
+        ));
+    }
+    for value in ["Bearer ", "Bearer    ", "Bearer\tsecret", " Bearer secret"] {
+        assert_eq!(bearer_token(value.as_bytes()), None);
+    }
+    for token in ["a b", "secret ", "\tsecret", "secret\t"] {
+        let value = format!("Bearer  {token}");
+        assert_eq!(bearer_token(value.as_bytes()), Some(token));
+        assert_eq!(
+            authenticate_admin_tokens(Some(&h), bearer_token(value.as_bytes()), None),
+            Verdict::Reject,
+            "separator parsing must not normalize token bytes"
+        );
+    }
+    assert_eq!(
+        authenticate_admin_tokens(Some(&h), bearer_token(b"Bearer  wrong"), None),
+        Verdict::Reject
     );
 }
 
@@ -238,7 +239,8 @@ fn the_bearer_split_is_the_first_single_space_and_the_token_is_verbatim() {
 fn debug_never_prints_the_configured_digest() {
     let h = hash("secret");
     let settings = format!("\"{h}\"");
-    let plugin = <AdminTokens as VerifyPlugin>::open(settings.as_bytes(), &[]).expect("opens");
+    let plugin =
+        <AdminTokens as VerifyPlugin>::open_refusing(settings.as_bytes(), &[]).expect("opens");
     let shown = format!("{plugin:?}");
     assert!(!shown.contains(&h), "{shown}");
     assert!(!shown.contains(&h[..16]), "{shown}");
@@ -353,14 +355,14 @@ fn an_admin_token_never_appears_in_logs_or_errors() {
             Err(e) => surfaces.push(e.to_string()),
             Ok(d) => panic!("settings {settings:?} were accepted as the digest {d:?}"),
         }
-        match <AdminTokens as VerifyPlugin>::open(settings.as_bytes(), &[]) {
+        match <AdminTokens as VerifyPlugin>::open_refusing(settings.as_bytes(), &[]) {
             Err(e) => surfaces.push(e.to_string()),
             Ok(_) => panic!("open accepted {settings:?}"),
         }
     }
 
-    let plugin =
-        <AdminTokens as VerifyPlugin>::open(format!("\"{h}\"").as_bytes(), &[]).expect("opens");
+    let plugin = <AdminTokens as VerifyPlugin>::open_refusing(format!("\"{h}\"").as_bytes(), &[])
+        .expect("opens");
     surfaces.push(format!("{plugin:?}"));
     surfaces.extend(cap.messages());
     for surface in &surfaces {
@@ -407,8 +409,8 @@ fn a_settings_refusal_is_an_instance_relative_settings_line() {
 fn a_refused_refresh_is_logged_and_keeps_the_digest() {
     const RAW: &str = "REFRESH-RAW-TOKEN-5c1e";
     let h = hash("secret");
-    let plugin =
-        <AdminTokens as VerifyPlugin>::open(format!("\"{h}\"").as_bytes(), &[]).expect("opens");
+    let plugin = <AdminTokens as VerifyPlugin>::open_refusing(format!("\"{h}\"").as_bytes(), &[])
+        .expect("opens");
     let cap = LogCapture::capturing_debug();
     tracing::subscriber::with_default(cap.subscriber(), || {
         assert_eq!(
@@ -491,7 +493,8 @@ fn the_held_digest_is_a_wiping_holder_that_a_reload_replaces() {
     fn wipes<T: zeroize::ZeroizeOnDrop>(_: &T) {}
     let first = hash("first");
     let settings = format!("\"{first}\"");
-    let plugin = <AdminTokens as VerifyPlugin>::open(settings.as_bytes(), &[]).expect("opens");
+    let plugin =
+        <AdminTokens as VerifyPlugin>::open_refusing(settings.as_bytes(), &[]).expect("opens");
     {
         let held = plugin.configured_hash.read().expect("unpoisoned");
         wipes(&*held);
@@ -592,7 +595,8 @@ fn a_carrier_on_several_lines_matches_only_if_every_copy_does() {
 fn a_poisoned_digest_lock_still_judges_and_rotates() {
     let first = hash("first");
     let plugin =
-        <AdminTokens as VerifyPlugin>::open(format!("\"{first}\"").as_bytes(), &[]).expect("opens");
+        <AdminTokens as VerifyPlugin>::open_refusing(format!("\"{first}\"").as_bytes(), &[])
+            .expect("opens");
     let panicked = std::thread::scope(|scope| {
         scope
             .spawn(|| {
@@ -799,8 +803,11 @@ mod reentrant_refresh_subscriber {
 
     struct Observed(Arc<AdminTokens>);
     impl VerifyPlugin for Observed {
-        fn open(settings: &[u8], secrets: &[&[u8]]) -> Result<Self, &'static str> {
-            AdminTokens::open(settings, secrets).map(|plugin| Self(Arc::new(plugin)))
+        fn open_refusing(settings: &[u8], secrets: &[&[u8]]) -> Result<Self, Refusal> {
+            AdminTokens::open_refusing(settings, secrets).map(|plugin| Self(Arc::new(plugin)))
+        }
+        fn reload(&self, settings: &[u8], secrets: &[&[u8]]) -> Result<u64, Refusal> {
+            self.0.reload(settings, secrets)
         }
         fn verify(&self, request: &VerifyView<'_>) -> Answer {
             tracing::subscriber::with_default(RefreshOnEvent(self.0.clone()), || {

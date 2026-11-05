@@ -56,11 +56,12 @@ A `refresh` whose settings are not a digest is refused (never echoing the value)
 the held digest stands.
 
 **Carriers.** The token is read off either of two lines: `Authorization: Bearer <token>` (scheme
-matched case-insensitively) or `X-Admin-Token: <token>`. As in busbar 1.5.5, both are read
-verbatim: the Bearer value is split on its first single space and the token is the rest exactly as
-sent (`Bearer  <token>` presents ` <token>`, a leading space leaves no scheme, a tab is no
-separator), and an `X-Admin-Token` value is the token exactly as sent, spaces and tabs included.
-A padded token is therefore a different, wrong credential. A line that is not header text (visible
+matched case-insensitively) or `X-Admin-Token: <token>`. The Bearer scheme is followed by one or
+more ASCII spaces, as RFC 6750 §2.1 specifies: `Bearer <token>` and `Bearer  <token>` present the
+same token. Only that separator run is consumed; subsequent token bytes are preserved. A leading
+space leaves no scheme and a tab is no separator. An `X-Admin-Token` value is the token exactly as
+sent, spaces and tabs included. Trailing whitespace or whitespace within a token remains part of
+the credential. This corrects 1.5.5's first-single-space Bearer parser in 1.6.0. A line that is not header text (visible
 ASCII, space or tab), a Bearer with no token, or an empty `X-Admin-Token` is read as absent and
 logged at info (never the value); another scheme is a silent absence. Every line of a carrier that
 a request repeats is read: a carrier matches only if every one of its presented lines does.

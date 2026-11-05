@@ -71,12 +71,12 @@ pub fn bearer_token(value: &[u8]) -> Option<&str> {
     bearer_of_text(header_text(value)?)
 }
 
-/// [`bearer_token`] over a value already known to be header text. As 1.5.5's
-/// `extract_bearer_token` did, the value is split on its FIRST single space and the token is the
-/// rest verbatim: nothing is trimmed, so `Bearer  t` presents ` t`, and a leading space leaves the
-/// scheme empty.
+/// [`bearer_token`] over a value already known to be header text. The Bearer scheme's separator
+/// is one or more ASCII spaces (RFC 6750 §2.1); consume that run, preserving all subsequent token
+/// bytes. A tab is not a scheme separator, and a leading space leaves the scheme empty.
 fn bearer_of_text(text: &str) -> Option<&str> {
     let (scheme, token) = text.split_once(' ')?;
+    let token = token.trim_start_matches(' ');
     (scheme.eq_ignore_ascii_case("bearer") && !token.is_empty()).then_some(token)
 }
 
@@ -348,9 +348,9 @@ impl VerifyPlugin for AdminTokens {
         digest_of(settings).map(|_| ()).map_err(Refusal::failed)
     }
 
-    fn open(settings: &[u8], _secrets: &[&[u8]]) -> Result<Self, &'static str> {
+    fn open_refusing(settings: &[u8], _secrets: &[&[u8]]) -> Result<Self, Refusal> {
         Ok(Self {
-            configured_hash: std::sync::RwLock::new(digest_of(settings)?),
+            configured_hash: std::sync::RwLock::new(digest_of(settings).map_err(Refusal::failed)?),
         })
     }
 
