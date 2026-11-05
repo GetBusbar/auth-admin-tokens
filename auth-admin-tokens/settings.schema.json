@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Admin token digest settings",
+  "description": "The lifecycle settings document is the SHA-256 digest as a JSON string, not an object. Unicode whitespace around the digest is ignored; the digest of an empty token is refused. Configure a digest, never the token.",
+  "type": "string",
+  "writeOnly": true,
+  "pattern": "^[\\x09-\\x0D \\x85\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]*[0-9a-fA-F]{64}[\\x09-\\x0D \\x85\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]*$",
+  "not": {
+    "pattern": "^[\\x09-\\x0D \\x85\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]*[eE]3[bB]0[cC]44298[fF][cC]1[cC]149[aA][fF][bB][fF]4[cC]8996[fF][bB]92427[aA][eE]41[eE]4649[bB]934[cC][aA]495991[bB]7852[bB]855[\\x09-\\x0D \\x85\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]*$"
+  }
+}

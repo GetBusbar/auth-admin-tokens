@@ -419,10 +419,14 @@ const TAIL: &AuthTail = &with_operator(verify_tail(0, AuthPoints::HEAD), ADMIN_T
 /// The concurrency the plugin states it serves.
 pub const CONCURRENCY: u32 = 1024;
 
+/// JSON Schema for the lifecycle settings document, embedded in the signed Statement.
+const SETTINGS_SCHEMA: &[u8] = include_bytes!("../settings.schema.json");
+
 /// What the plugin states: its name, version, the concurrency it serves ([`CONCURRENCY`]: a pure
 /// compare holding only the rotatable digest, like the other verifiers) and its two carriers.
 pub const STATEMENT: Statement = with_tail(
     Statement {
+        settings_schema: busbar_contract::abi::mechanism::call::Blob::json(SETTINGS_SCHEMA),
         mark_words: CARRIERS.as_ptr(),
         mark_words_len: CARRIERS.len(),
         ..statement(
@@ -443,3 +447,6 @@ pub mod door {
 #[cfg(test)]
 #[path = "tests/lib_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod settings_schema_tests;
