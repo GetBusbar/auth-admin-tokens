@@ -235,12 +235,11 @@ async fn every_copy_of_a_repeated_carrier_line_is_judged() {
     }
 }
 
-/// Both carriers are read verbatim through the door, as 1.5.5 read them: the Bearer is split on
-/// its first single space with the rest kept as the token, and an `X-Admin-Token` value is the
-/// token as sent. A padded right token is a presented wrong credential (`Reject`); a leading space
-/// leaves the Bearer no scheme (a silent absence, `Pass`).
+/// Bearer consumes one or more ASCII separator spaces, preserving the actual token bytes.
+/// An empty Bearer presents no credential (`Pass`); altered token bytes still reject.
+/// `X-Admin-Token` remains the verbatim value, without Bearer scheme parsing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn padded_carrier_values_are_read_verbatim_as_in_1_5_5() {
+async fn bearer_separator_spaces_preserve_credentials_through_the_door() {
     let door = opened();
     let both = format!("[{AUTHORIZATION}, {ADMIN_TOKEN_HEADER}]");
     let spaced = format!("Bearer  {TOKEN}");
@@ -250,7 +249,7 @@ async fn padded_carrier_values_are_read_verbatim_as_in_1_5_5() {
     let cases = [
         (
             vec![(AUTHORIZATION, spaced.as_str())],
-            format!("Reject {both}"),
+            format!("Identity(admin) {both}"),
         ),
         (
             vec![(AUTHORIZATION, trailing.as_str())],
@@ -260,7 +259,15 @@ async fn padded_carrier_values_are_read_verbatim_as_in_1_5_5() {
             vec![(AUTHORIZATION, leading.as_str())],
             format!("Pass {both}"),
         ),
-        (vec![(AUTHORIZATION, "Bearer   ")], format!("Reject {both}")),
+        (vec![(AUTHORIZATION, "Bearer   ")], format!("Pass {both}")),
+        (
+            vec![(AUTHORIZATION, "Bearer  wrong")],
+            format!("Reject {both}"),
+        ),
+        (
+            vec![(AUTHORIZATION, "Bearer  \t")],
+            format!("Reject {both}"),
+        ),
         (
             vec![(ADMIN_TOKEN_HEADER, header.as_str())],
             format!("Reject {both}"),
@@ -272,5 +279,7 @@ async fn padded_carrier_values_are_read_verbatim_as_in_1_5_5() {
             .verify_now(&request(&lines))
             .expect("admin-tokens answers on the spot");
         assert_eq!(spelled(&now), want, "on the spot: {lines:?}");
+        let awaited = Box::into_pin(door.verify(request(&lines))).await;
+        assert_eq!(spelled(&awaited), want, "awaited: {lines:?}");
     }
 }
