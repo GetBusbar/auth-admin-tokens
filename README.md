@@ -7,7 +7,6 @@ First-party signed kind:auth plugin cdylib: the built-in admin-tokens admin-auth
 |---|---|---|---|---|
 | `auth` | `admin-tokens` | `busbar-auth-admin-tokens-plugin` | 1.6.0 (pinned in `.busbar-ref`) | Apache-2.0 |
 
-[![ci](https://github.com/GetBusbar/busbar-auth-admin-tokens/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/GetBusbar/busbar-auth-admin-tokens/actions/workflows/ci.yml)
 <!-- fleet:header:end -->
 
 ## What it is for
