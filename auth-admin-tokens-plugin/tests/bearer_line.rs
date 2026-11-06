@@ -6,11 +6,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use busbar_auth_admin_tokens::{
-    authenticate_admin_tokens, ADMIN_TOKENS_PRINCIPAL_ID, ADMIN_TOKEN_HEADER,
-};
+use busbar_auth_admin_tokens::{ADMIN_TOKENS_PRINCIPAL_ID, ADMIN_TOKEN_HEADER};
 use busbar_contract::abi::auth::AuthPoint;
-use busbar_contract::abi::sdk::auth_door::Verdict;
 use busbar_contract::auth_calls::{AuthCalls, Verified, VerifyAnswer, VerifyRequest};
 use busbar_contract::sha256_hex;
 use busbar_plugin_loader::auth_axis::AuthRows;
@@ -98,6 +95,7 @@ fn spelled(a: &VerifyAnswer) -> String {
 }
 
 /// The Bearer is read off the `authorization` line: alone it identifies (in any scheme case), a
+/// wrong token rejects, another scheme or an empty Bearer passes, and both names are stripped.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_bearer_on_the_authorization_line_is_judged() {
     let door = opened();
@@ -154,24 +152,24 @@ async fn the_bearer_on_the_authorization_line_is_judged() {
     }
 }
 
-/// The door's verdict for a Bearer on its line is the fold's own for that Bearer: the module's
+/// The door's verdict for a Bearer on its line is the token's: the operator token identifies,
+/// any other token (dotted or not) rejects.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn the_door_judges_the_line_as_the_fold_judges_the_bearer() {
+async fn the_door_judges_a_bearer_line_by_its_token() {
     let door = opened();
-    let digest = sha256_hex(TOKEN.as_bytes());
-    for token in [TOKEN, "not-the-token", "aaa.bbb.ccc"] {
+    let operator = format!("Identity({ADMIN_TOKENS_PRINCIPAL_ID})");
+    for (token, want) in [
+        (TOKEN, operator.as_str()),
+        ("not-the-token", "Reject"),
+        ("aaa.bbb.ccc", "Reject"),
+    ] {
         let line = format!("Bearer {token}");
         let got = door
             .verify_now(&request(&[(AUTHORIZATION, line.as_str())]))
             .expect("admin-tokens answers on the spot");
-        let want = match authenticate_admin_tokens(Some(&digest), Some(token), None) {
-            Verdict::Identity(id) => format!("Identity({})", id.subject),
-            Verdict::Reject | Verdict::RejectBecause(_) => "Reject".into(),
-            Verdict::Pass => "Pass".into(),
-        };
         assert!(
             spelled(&got).starts_with(&format!("{want} ")),
-            "{token}: {} is not the fold's {want}",
+            "{token}: {} is not {want}",
             spelled(&got)
         );
     }
@@ -214,6 +212,27 @@ async fn every_copy_of_a_repeated_carrier_line_is_judged() {
         ),
         (
             vec![(ADMIN_TOKEN_HEADER, TOKEN), (ADMIN_TOKEN_HEADER, TOKEN)],
+            format!("{operator} {both}"),
+        ),
+        (
+            vec![
+                (AUTHORIZATION, bearer.as_str()),
+                (AUTHORIZATION, "Bearer not-the-token"),
+            ],
+            format!("Reject {both}"),
+        ),
+        (
+            vec![
+                (AUTHORIZATION, "Bearer not-the-token"),
+                (AUTHORIZATION, bearer.as_str()),
+            ],
+            format!("Reject {both}"),
+        ),
+        (
+            vec![
+                (AUTHORIZATION, bearer.as_str()),
+                (AUTHORIZATION, bearer.as_str()),
+            ],
             format!("{operator} {both}"),
         ),
         (

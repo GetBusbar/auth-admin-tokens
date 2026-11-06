@@ -6,11 +6,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use busbar_auth_admin_tokens::{
-    authenticate_admin_tokens, ADMIN_TOKEN_HEADER, AUTHORIZATION_HEADER,
-};
+use busbar_auth_admin_tokens::{ADMIN_TOKEN_HEADER, AUTHORIZATION_HEADER};
 use busbar_contract::abi::auth::AuthPoint;
-use busbar_contract::abi::sdk::auth_door::Verdict;
 use busbar_contract::auth_calls::{Verified, VerifyAnswer, VerifyRequest};
 use busbar_contract::sha256_hex;
 use busbar_plugin_loader::auth_axis::AuthRows;
@@ -29,21 +26,29 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The operator's token. The plugin is configured with its SHA-256 digest, never the token.
 const TOKEN: &str = "the-operator-token";
 
-/// The carriers each door judges, as (Bearer, `X-Admin-Token`): the accepted token on either and
-const CASES: [(Option<&str>, Option<&str>); 13] = [
-    (Some(TOKEN), None),
-    (None, Some(TOKEN)),
-    (Some(TOKEN), Some(TOKEN)),
-    (Some("not-the-token"), Some(TOKEN)),
-    (Some(TOKEN), Some("not-the-token")),
-    (None, Some(" the-operator-token")),
-    (None, Some("the-operator-token ")),
-    (None, Some("\tthe-operator-token\t")),
-    (Some("not-the-token"), None),
-    (None, Some("not-the-token")),
-    (Some("aaa.bbb.ccc"), None),
-    (Some("aaa.bbb.ccc"), Some("not-the-token")),
-    (None, None),
+/// An identity continues the chain.
+const IDENTIFIES: &str = "Identity(admin) Continue";
+/// A presented wrong credential stops it.
+const REJECTS: &str = "Reject Stop";
+/// No credential presented continues it.
+const PASSES: &str = "Pass Continue";
+
+/// The carriers each door judges, as (Bearer, `X-Admin-Token`, verdict): the accepted token on
+/// either and both, wrong or padded tokens, a dotted token, and no credential at all.
+const CASES: [(Option<&str>, Option<&str>, &str); 13] = [
+    (Some(TOKEN), None, IDENTIFIES),
+    (None, Some(TOKEN), IDENTIFIES),
+    (Some(TOKEN), Some(TOKEN), IDENTIFIES),
+    (Some("not-the-token"), Some(TOKEN), IDENTIFIES),
+    (Some(TOKEN), Some("not-the-token"), IDENTIFIES),
+    (None, Some(" the-operator-token"), REJECTS),
+    (None, Some("the-operator-token "), REJECTS),
+    (None, Some("\tthe-operator-token\t"), REJECTS),
+    (Some("not-the-token"), None, REJECTS),
+    (None, Some("not-the-token"), REJECTS),
+    (Some("aaa.bbb.ccc"), None, REJECTS),
+    (Some("aaa.bbb.ccc"), Some("not-the-token"), REJECTS),
+    (None, None, PASSES),
 ];
 
 /// The qualification lane supplies the exact freshly built actual product image.
@@ -60,6 +65,7 @@ fn cdylib() -> Vec<u8> {
 }
 
 /// The door's own Statement rendering, as the lower-case hex a signed manifest carries (the
+/// manifest's `statement` field).
 fn rendering_hex() -> String {
     let rendering =
         busbar_plugin_loader::dispatch::LinkedRow::of(busbar_auth_admin_tokens::door::door)
@@ -103,6 +109,7 @@ fn linked() -> PluginRegistry {
 }
 
 /// THE DROPPED-IN DOOR: `lib` signed by `signer` into a fresh `plugins/` directory, scanned under a
+/// trust policy that admits it (first-party under the release key, else as an allowed third party).
 fn dropped(tag: &str, lib: &[u8], signer: &SigningKey) -> PluginRegistry {
     let dir = std::env::temp_dir().join(format!(
         "auth-admin-tokens-conf-{tag}-{}",
@@ -141,6 +148,7 @@ fn dropped(tag: &str, lib: &[u8], signer: &SigningKey) -> PluginRegistry {
 }
 
 /// The process's dispatcher, as the composition root builds one: lent a seal, so a verify reveals
+/// the credential lines it lends the door.
 fn dispatcher() -> Arc<Dispatcher> {
     let d = Dispatcher::new(DispatchConfig {
         workers: 2,
@@ -153,6 +161,7 @@ fn dispatcher() -> Arc<Dispatcher> {
 }
 
 /// One carrier case as the host hands it to `verify` at the Head point: the Bearer on the
+/// `authorization` line as `Bearer <token>`, the header verbatim on `x-admin-token`.
 fn request(bearer: Option<&str>, header: Option<&str>) -> VerifyRequest {
     let line = |name: &str, value: String| (name.to_string(), value.into_bytes().into());
     let lines = bearer
@@ -182,17 +191,8 @@ fn spelled(a: &VerifyAnswer) -> String {
     format!("{verdict} {:?} [{}]", a.decision, strips.join(", "))
 }
 
-/// The linked function's verdict, spelled the same way: an identity or a pass continues, a reject
-fn expected(digest: &str, bearer: Option<&str>, header: Option<&str>) -> String {
-    let verdict = match authenticate_admin_tokens(Some(digest), bearer, header) {
-        Verdict::Identity(id) => format!("Identity({}) Continue", id.subject),
-        Verdict::Reject | Verdict::RejectBecause(_) => "Reject Stop".into(),
-        Verdict::Pass => "Pass Continue".into(),
-    };
-    format!("{verdict} {STRIPS}")
-}
-
 /// What one door does, as one comparable transcript: the row's statement (every manifest field but
+/// its digest and signature), its facts, every case's answer, and the refusal of a raw token.
 async fn transcript(registry: PluginRegistry, digest: &str) -> serde_json::Value {
     let registry = Arc::new(registry);
     let p = registry
@@ -209,7 +209,7 @@ async fn transcript(registry: PluginRegistry, digest: &str) -> serde_json::Value
         .expect("the plugin opens over a digest");
     let mut now = Vec::new();
     let mut submitted = Vec::new();
-    for (bearer, header) in CASES {
+    for (bearer, header, _) in CASES {
         let v = opened
             .verify_now(&request(bearer, header))
             .expect("admin-tokens answers on the spot");
@@ -237,6 +237,7 @@ async fn transcript(registry: PluginRegistry, digest: &str) -> serde_json::Value
 }
 
 /// The plugin registers ONE row and judges as ONE plugin through either door, on the spot and
+/// awaited alike.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_linked_and_the_dropped_in_admin_tokens_plugin_are_one_plugin() {
     let digest = sha256_hex(TOKEN.as_bytes());
@@ -248,7 +249,7 @@ async fn the_linked_and_the_dropped_in_admin_tokens_plugin_are_one_plugin() {
 
     let want: Vec<String> = CASES
         .iter()
-        .map(|(b, h)| expected(&digest, *b, *h))
+        .map(|(_, _, verdict)| format!("{verdict} {STRIPS}"))
         .collect();
     assert_eq!(linked["now"], serde_json::json!(want));
     assert_eq!(linked["submitted"], serde_json::json!(want));

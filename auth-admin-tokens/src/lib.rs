@@ -63,15 +63,8 @@ fn header_text(value: &[u8]) -> Option<&str> {
     std::str::from_utf8(value).ok()
 }
 
-/// The token of an `Authorization` value in the Bearer scheme: the value header text, the scheme
-/// matched case-insensitively, the token non-empty. Any other value (another scheme, not header
-/// text, no token) presents no Bearer.
-#[must_use]
-pub fn bearer_token(value: &[u8]) -> Option<&str> {
-    bearer_of_text(header_text(value)?)
-}
-
-/// [`bearer_token`] over a value already known to be header text. The Bearer scheme's separator
+/// The token of an `Authorization` value already known to be header text, in the Bearer scheme:
+/// the scheme matched case-insensitively, the token non-empty. The Bearer scheme's separator
 /// is one or more ASCII spaces (RFC 6750 §2.1); consume that run, preserving all subsequent token
 /// bytes. A tab is not a scheme separator, and a leading space leaves the scheme empty.
 fn bearer_of_text(text: &str) -> Option<&str> {
@@ -88,8 +81,10 @@ fn operator() -> VerifiedIdentity {
     }
 }
 
-/// Judge the presented admin credential carriers against the configured admin token hash
-/// (SHA-256 hex, pre-computed by the host), one presented line per carrier.
+/// Judge every presented line of each carrier (`bearers` off the `authorization` lines, `headers`
+/// off the `x-admin-token` lines) against the configured admin token hash (the lower-case SHA-256
+/// hex [`digest_of`] reads off the settings), comparing each with `matches` ([`token_matches`]; the
+/// parameter is the seam that lets a test count the compares).
 ///
 /// Timing stance: once any credential is presented, BOTH carriers are hashed and compared
 /// unconditionally (an absent one against a fixed placeholder whose result is discarded) and the
@@ -98,25 +93,32 @@ fn operator() -> VerifiedIdentity {
 /// compare, so it runs over fixed-length digests and reveals neither the configured token's length
 /// nor a partial match.
 ///
-/// `None` hash (no admin token configured) ⇒ `Pass` — this module has nothing to judge; a chain
-/// that ends all-`Pass` is denied (fail-closed), preserving "admin API disabled without a token".
-/// No credential presented ⇒ `Pass`.
+/// No credential presented ⇒ `Pass` (a chain that ends all-`Pass` is denied, fail-closed).
 ///
 /// A credential presented and not matching is a wrong credential, whatever its shape: `Reject`,
 /// terminal in the admin chain. A JWS/JWT-shaped wrong token is not passed on to the next
 /// `admin_auth:` module.
-#[must_use]
-pub fn authenticate_admin_tokens(
-    configured_hash: Option<&str>,
-    bearer: Option<&str>,
-    header: Option<&str>,
+fn judge(
+    configured_hash: &str,
+    bearers: &[&str],
+    headers: &[&str],
+    matches: impl Fn(&str, &str) -> bool,
 ) -> Verdict {
-    judge(
-        configured_hash,
-        bearer.as_slice(),
-        header.as_slice(),
-        token_matches,
-    )
+    if bearers.is_empty() && headers.is_empty() {
+        return Verdict::Pass;
+    }
+    let bearer_match = carrier_matches(bearers, configured_hash, &matches);
+    let header_match = carrier_matches(headers, configured_hash, &matches);
+    if std::hint::black_box(bearer_match | header_match) != 0 {
+        return Verdict::Identity(operator());
+    }
+    // A credential was presented and no carrier matched. Neither the token nor the digest is
+    // logged.
+    tracing::info!(
+        module = ADMIN_TOKENS_MODULE_NAME,
+        "admin token refused: token mismatch"
+    );
+    Verdict::Reject
 }
 
 /// Whether `token` is the configured admin token: its SHA-256 digest in lower-case hex, compared
@@ -158,35 +160,6 @@ fn carrier_matches(
     u8::from(presented) & every
 }
 
-/// [`authenticate_admin_tokens`] over every presented line of each carrier (`bearers` off the
-/// `authorization` lines, `headers` off the `x-admin-token` lines), comparing each with `matches`
-/// ([`token_matches`]; the parameter is the seam that lets a test count the compares).
-fn judge(
-    configured_hash: Option<&str>,
-    bearers: &[&str],
-    headers: &[&str],
-    matches: impl Fn(&str, &str) -> bool,
-) -> Verdict {
-    let Some(configured_hash) = configured_hash else {
-        return Verdict::Pass;
-    };
-    if bearers.is_empty() && headers.is_empty() {
-        return Verdict::Pass;
-    }
-    let bearer_match = carrier_matches(bearers, configured_hash, &matches);
-    let header_match = carrier_matches(headers, configured_hash, &matches);
-    if std::hint::black_box(bearer_match | header_match) != 0 {
-        return Verdict::Identity(operator());
-    }
-    // A credential was presented and no carrier matched. Neither the token nor the digest is
-    // logged.
-    tracing::info!(
-        module = ADMIN_TOKENS_MODULE_NAME,
-        "admin token refused: token mismatch"
-    );
-    Verdict::Reject
-}
-
 /// The refusal of settings that are not a digest. It never echoes what it was given.
 pub const NOT_A_DIGEST: &str = "settings: must be the admin token's SHA-256 digest as 64 hex \
                                 characters (the value is not echoed)";
@@ -204,7 +177,7 @@ const EMPTY_TOKEN_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b93
 /// anything else is refused. Always hash the token before configuring it: a raw token that is
 /// itself 64 hex characters is indistinguishable from a digest and would be interpreted as one.
 ///
-/// The string is decoded by [`settings_text`] into one wiping buffer, so no unwiped copy of the
+/// The string is decoded by `settings_text` into one wiping buffer, so no unwiped copy of the
 /// digest is made, whether or not the document escapes any of it.
 ///
 /// # Errors
@@ -395,7 +368,7 @@ impl VerifyPlugin for AdminTokens {
                 headers.extend(header_line(value));
             }
         }
-        let verdict = judge(Some(digest.as_str()), &bearers, &headers, token_matches);
+        let verdict = judge(digest.as_str(), &bearers, &headers, token_matches);
         Answer {
             strips: vec![
                 Strip::field(AUTHORIZATION_HEADER),

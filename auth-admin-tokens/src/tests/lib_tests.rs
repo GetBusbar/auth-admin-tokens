@@ -10,33 +10,34 @@ fn hash(s: &str) -> String {
     sha256_hex(s.as_bytes())
 }
 
-#[test]
-fn no_configured_token_passes() {
-    assert_eq!(
-        authenticate_admin_tokens(None, Some("x"), None),
-        Verdict::Pass
-    );
+/// The fold over at most one line per carrier, as `verify` runs it.
+fn fold(configured_hash: &str, bearer: Option<&str>, header: Option<&str>) -> Verdict {
+    judge(
+        configured_hash,
+        bearer.as_slice(),
+        header.as_slice(),
+        token_matches,
+    )
 }
 
 #[test]
 fn no_credential_passes() {
     let h = hash("secret");
-    assert_eq!(
-        authenticate_admin_tokens(Some(&h), None, None),
-        Verdict::Pass
-    );
+    assert_eq!(fold(&h, None, None), Verdict::Pass);
 }
 
+/// Both carriers matching (where `|` and `^` differ) still identifies.
 #[test]
 fn either_carrier_identifies() {
     let h = hash("secret");
     for (b, hd) in [
         (Some("secret"), None),
         (None, Some("secret")),
+        (Some("secret"), Some("secret")),
         (Some("secret"), Some("wrong")),
         (Some("wrong"), Some("secret")),
     ] {
-        match authenticate_admin_tokens(Some(&h), b, hd) {
+        match fold(&h, b, hd) {
             Verdict::Identity(p) => assert_eq!(p.subject, ADMIN_TOKENS_PRINCIPAL_ID),
             other => panic!("expected Identify, got {other:?} for ({b:?},{hd:?})"),
         }
@@ -48,14 +49,14 @@ fn either_carrier_identifies() {
 fn a_jws_shaped_configured_token_identifies() {
     let token = "abc.def.ghi";
     let h = hash(token);
-    match authenticate_admin_tokens(Some(&h), Some(token), None) {
+    match fold(&h, Some(token), None) {
         Verdict::Identity(p) => assert_eq!(p.subject, ADMIN_TOKENS_PRINCIPAL_ID),
         other => panic!("expected Identity, got {other:?}"),
     }
     let settings = format!("\"{h}\"");
     let plugin = <AdminTokens as VerifyPlugin>::open_refusing(settings.as_bytes(), &[])
         .expect("a digest opens");
-    match authenticate_admin_tokens(Some(&plugin.digest()), Some(token), None) {
+    match fold(&plugin.digest(), Some(token), None) {
         Verdict::Identity(p) => assert_eq!(p.subject, ADMIN_TOKENS_PRINCIPAL_ID),
         other => panic!("expected Identity, got {other:?}"),
     };
@@ -64,14 +65,8 @@ fn a_jws_shaped_configured_token_identifies() {
 #[test]
 fn wrong_credential_rejects() {
     let h = hash("secret");
-    assert_eq!(
-        authenticate_admin_tokens(Some(&h), Some("nope"), None),
-        Verdict::Reject
-    );
-    assert_eq!(
-        authenticate_admin_tokens(Some(&h), None, Some("nope")),
-        Verdict::Reject
-    );
+    assert_eq!(fold(&h, Some("nope"), None), Verdict::Reject);
+    assert_eq!(fold(&h, None, Some("nope")), Verdict::Reject);
 }
 
 #[test]
@@ -80,12 +75,12 @@ fn a_non_jws_wrong_credential_still_terminally_rejects() {
 
     for candidate in ["nope", "a.b", "a.b.c.d", "a..c", ".b.c", "a.b."] {
         assert_eq!(
-            authenticate_admin_tokens(Some(&h), Some(candidate), None),
+            fold(&h, Some(candidate), None),
             Verdict::Reject,
             "`{candidate}` is addressed to this module and wrong; it must deny, not pass"
         );
         assert_eq!(
-            authenticate_admin_tokens(Some(&h), None, Some(candidate)),
+            fold(&h, None, Some(candidate)),
             Verdict::Reject,
             "`{candidate}` on the header carrier must deny too"
         );
@@ -96,13 +91,10 @@ fn a_non_jws_wrong_credential_still_terminally_rejects() {
 fn a_jws_shaped_wrong_token_never_admits_and_the_fold_still_finds_the_token() {
     let h = hash("secret");
     let jws = "aaa.bbb.ccc";
-    assert_eq!(
-        authenticate_admin_tokens(Some(&h), Some(jws), None),
-        Verdict::Reject
-    );
+    assert_eq!(fold(&h, Some(jws), None), Verdict::Reject);
 
     for (b, hd) in [(Some("secret"), Some(jws)), (Some(jws), Some("secret"))] {
-        match authenticate_admin_tokens(Some(&h), b, hd) {
+        match fold(&h, b, hd) {
             Verdict::Identity(p) => assert_eq!(p.subject, ADMIN_TOKENS_PRINCIPAL_ID),
             other => panic!("expected Identify, got {other:?} for ({b:?},{hd:?})"),
         }
@@ -125,6 +117,7 @@ fn a_blank_or_non_text_admin_header_is_absent() {
 }
 
 /// `open` takes the digest, never the raw token, and refuses anything that is not one — with a
+/// refusal ([`NOT_A_DIGEST`]) that never echoes the value.
 #[test]
 fn open_refuses_settings_that_are_not_a_sha256_hex_digest() {
     let h = hash("secret");
@@ -189,17 +182,18 @@ fn the_statement_names_the_module_and_the_header_carrier() {
     assert_eq!(TAIL.operator_principal.len, ADMIN_TOKENS_PRINCIPAL_ID.len());
 }
 
-/// The Bearer comes off the `authorization` line by 1.5.5's rule: the scheme in any case, a
+/// The Bearer comes off the `authorization` line: the scheme in any case, a
+/// non-empty token, and a value that is header text; anything else presents no Bearer.
 #[test]
 fn the_bearer_is_read_off_the_authorization_line() {
-    assert_eq!(bearer_token(b"Bearer abc123"), Some("abc123"));
-    assert_eq!(bearer_token(b"bEaReR abc123"), Some("abc123"));
-    assert_eq!(bearer_token(b"Basic abc123"), None);
-    assert_eq!(bearer_token(b"Bearer "), None);
-    assert_eq!(bearer_token(b"Bearer"), None);
-    assert_eq!(bearer_token(b""), None);
+    assert_eq!(bearer_line(b"Bearer abc123"), Some("abc123"));
+    assert_eq!(bearer_line(b"bEaReR abc123"), Some("abc123"));
+    assert_eq!(bearer_line(b"Basic abc123"), None);
+    assert_eq!(bearer_line(b"Bearer "), None);
+    assert_eq!(bearer_line(b"Bearer"), None);
+    assert_eq!(bearer_line(b""), None);
     assert_eq!(
-        bearer_token(b"Bearer \xff"),
+        bearer_line(b"Bearer \xff"),
         None,
         "a non-UTF-8 value is not a Bearer"
     );
@@ -210,26 +204,26 @@ fn the_bearer_is_read_off_the_authorization_line() {
 fn the_bearer_consumes_the_scheme_separator_and_preserves_token_bytes() {
     let h = hash("secret");
     for value in ["Bearer secret", "Bearer  secret", "bEaReR    secret"] {
-        assert_eq!(bearer_token(value.as_bytes()), Some("secret"));
+        assert_eq!(bearer_line(value.as_bytes()), Some("secret"));
         assert!(matches!(
-            authenticate_admin_tokens(Some(&h), bearer_token(value.as_bytes()), None),
+            fold(&h, bearer_line(value.as_bytes()), None),
             Verdict::Identity(_)
         ));
     }
     for value in ["Bearer ", "Bearer    ", "Bearer\tsecret", " Bearer secret"] {
-        assert_eq!(bearer_token(value.as_bytes()), None);
+        assert_eq!(bearer_line(value.as_bytes()), None);
     }
     for token in ["a b", "secret ", "\tsecret", "secret\t"] {
         let value = format!("Bearer  {token}");
-        assert_eq!(bearer_token(value.as_bytes()), Some(token));
+        assert_eq!(bearer_line(value.as_bytes()), Some(token));
         assert_eq!(
-            authenticate_admin_tokens(Some(&h), bearer_token(value.as_bytes()), None),
+            fold(&h, bearer_line(value.as_bytes()), None),
             Verdict::Reject,
             "separator parsing must not normalize token bytes"
         );
     }
     assert_eq!(
-        authenticate_admin_tokens(Some(&h), bearer_token(b"Bearer  wrong"), None),
+        fold(&h, bearer_line(b"Bearer  wrong"), None),
         Verdict::Reject
     );
 }
@@ -247,12 +241,13 @@ fn debug_never_prints_the_configured_digest() {
 }
 
 /// A wrong token is refused AND the refusal is logged (module = admin-tokens), with neither the
+/// token nor the digest in the log.
 #[test]
 fn a_wrong_token_reject_is_logged_without_the_token() {
     let h = hash("secret");
     let cap = LogCapture::capturing_debug();
     let verdict = tracing::subscriber::with_default(cap.subscriber(), || {
-        authenticate_admin_tokens(Some(&h), Some("WRONG-TOKEN-TEXT"), None)
+        fold(&h, Some("WRONG-TOKEN-TEXT"), None)
     });
     assert_eq!(verdict, Verdict::Reject);
     let logged = cap.messages().join("\n");
@@ -268,15 +263,13 @@ fn a_pass_logs_nothing() {
     let h = hash("secret");
     let cap = LogCapture::capturing_debug();
     tracing::subscriber::with_default(cap.subscriber(), || {
-        assert_eq!(
-            authenticate_admin_tokens(Some(&h), None, None),
-            Verdict::Pass
-        );
+        assert_eq!(fold(&h, None, None), Verdict::Pass);
     });
     assert!(cap.messages().is_empty(), "{:?}", cap.messages());
 }
 
 /// A credential line that is not header text is read as absent AND says so in the log, without the
+/// value.
 #[test]
 fn a_non_header_text_credential_line_is_logged() {
     let cap = LogCapture::capturing_debug();
@@ -295,6 +288,7 @@ fn a_non_header_text_credential_line_is_logged() {
 }
 
 /// A credential line that is PRESENT but yields no token (an empty Bearer token, a blank
+/// `X-Admin-Token`) is read as absent and says so in the log; a token or other scheme logs nothing.
 #[test]
 fn a_present_line_with_no_token_is_logged() {
     let cap = LogCapture::capturing_debug();
@@ -320,6 +314,7 @@ fn a_present_line_with_no_token_is_logged() {
 }
 
 /// The primitive answers equality only for the same full byte string. Constant-time use is
+/// the contract's guarantee, not measured here.
 #[test]
 fn the_constant_time_primitive_compares_the_full_bytes() {
     assert!(constant_time_eq("abc", "abc"));
@@ -328,6 +323,7 @@ fn the_constant_time_primitive_compares_the_full_bytes() {
 }
 
 /// An admin token never appears in a log line or an error string: not when it matches, not when it
+/// mismatches, not when its line is malformed, and not in a settings refusal or `Debug`.
 #[test]
 fn an_admin_token_never_appears_in_logs_or_errors() {
     const TOKEN: &str = "ADMIN-SENTINEL-7f3a91c2e8b4";
@@ -335,10 +331,10 @@ fn an_admin_token_never_appears_in_logs_or_errors() {
     let cap = LogCapture::capturing_debug();
     let mut surfaces: Vec<String> = Vec::new();
     tracing::subscriber::with_default(cap.subscriber(), || {
-        let _ = authenticate_admin_tokens(Some(&h), Some(TOKEN), None);
-        let _ = authenticate_admin_tokens(Some(&h), None, Some(TOKEN));
-        let _ = authenticate_admin_tokens(Some(&h), Some(&format!("{TOKEN}x")), None);
-        let _ = authenticate_admin_tokens(Some(&h), None, Some(&format!("x{TOKEN}")));
+        let _ = fold(&h, Some(TOKEN), None);
+        let _ = fold(&h, None, Some(TOKEN));
+        let _ = fold(&h, Some(&format!("{TOKEN}x")), None);
+        let _ = fold(&h, None, Some(&format!("x{TOKEN}")));
 
         let _ = bearer_line(format!("Bearer {TOKEN}\u{1}").as_bytes());
         let _ = header_line(format!("{TOKEN}\u{7f}").as_bytes());
@@ -384,6 +380,7 @@ fn statement_concurrency_is_1024() {
 }
 
 /// A settings refusal is a line in the contract's instance-relative form (`settings: <reason>`), so
+/// the host reports it as `auth.admin-tokens.settings: <reason>`, never echoing the value.
 #[test]
 fn a_settings_refusal_is_an_instance_relative_settings_line() {
     use busbar_contract::abi::mechanism::lifecycle::{check_validate_refusal, refusal_lines};
@@ -454,6 +451,7 @@ fn a_refused_refresh_is_logged_and_keeps_the_digest() {
 }
 
 /// The SDK's secret-derived digest is a wiping holder and agrees with an independent published
+/// SHA-256 test vector.
 #[test]
 fn the_presented_token_uses_a_wiping_digest_with_unchanged_hash_bytes() {
     fn wipes<T: zeroize::ZeroizeOnDrop>(_: &T) {}
@@ -473,14 +471,11 @@ fn the_presented_token_uses_a_wiping_digest_with_unchanged_hash_bytes() {
         let configured = hash(&token);
         for (bearer, header) in [(Some(token.as_str()), None), (None, Some(token.as_str()))] {
             assert!(matches!(
-                authenticate_admin_tokens(Some(&configured), bearer, header),
+                fold(&configured, bearer, header),
                 Verdict::Identity(_)
             ));
         }
-        assert_eq!(
-            authenticate_admin_tokens(Some(&configured), Some("different"), None),
-            Verdict::Reject
-        );
+        assert_eq!(fold(&configured, Some("different"), None), Verdict::Reject);
     }
 }
 
@@ -508,12 +503,12 @@ fn the_held_digest_is_a_wiping_holder_that_a_reload_replaces() {
     );
     assert_eq!(plugin.digest().as_str(), second);
     assert_eq!(
-        authenticate_admin_tokens(Some(&plugin.digest()), Some("first"), None),
+        fold(&plugin.digest(), Some("first"), None),
         Verdict::Reject,
         "the retired digest no longer admits"
     );
     assert!(matches!(
-        authenticate_admin_tokens(Some(&plugin.digest()), Some("second"), None),
+        fold(&plugin.digest(), Some("second"), None),
         Verdict::Identity(_)
     ));
 }
@@ -549,7 +544,7 @@ fn every_carrier_and_every_copy_is_compared_with_no_short_circuit() {
         (none, none, 0),
     ] {
         let count = std::cell::Cell::new(0);
-        let _ = judge(Some(h.as_str()), bearers, headers, |token, configured| {
+        let _ = judge(h.as_str(), bearers, headers, |token, configured| {
             count.set(count.get() + 1);
             token_matches(token, configured)
         });
@@ -577,7 +572,7 @@ fn a_carrier_on_several_lines_matches_only_if_every_copy_does() {
         (&["secret"][..], &["secret", "wrong"][..], true),
         (&["wrong", "secret"][..], &["secret"][..], true),
     ] {
-        let verdict = judge(Some(h.as_str()), bearers, headers, token_matches);
+        let verdict = judge(h.as_str(), bearers, headers, token_matches);
         if identifies {
             assert!(
                 matches!(verdict, Verdict::Identity(_)),
@@ -609,7 +604,7 @@ fn a_poisoned_digest_lock_still_judges_and_rotates() {
     assert!(plugin.configured_hash.is_poisoned());
     assert_eq!(plugin.digest().as_str(), first);
     assert!(matches!(
-        authenticate_admin_tokens(Some(&plugin.digest()), Some("first"), None),
+        fold(&plugin.digest(), Some("first"), None),
         Verdict::Identity(_)
     ));
     let second = hash("second");
@@ -1002,7 +997,7 @@ fn a_padded_admin_header_is_compared_verbatim_and_rejected() {
     for value in [" secret", "secret ", "\tsecret\t"] {
         assert_eq!(header_line(value.as_bytes()), Some(value));
         assert_eq!(
-            authenticate_admin_tokens(Some(&configured), None, header_line(value.as_bytes())),
+            fold(&configured, None, header_line(value.as_bytes())),
             Verdict::Reject,
             "{value:?}"
         );
@@ -1052,4 +1047,55 @@ impl LogCapture {
             .with_writer(self.clone())
             .finish()
     }
+}
+
+/// Every presented credential that does not hash-match the configured token is rejected, on
+/// either carrier or both, whatever its shape (1.5.5 ended every mismatch in `Reject`, terminal in
+/// the admin chain: a wrong JWS-shaped token is not passed on to the next `admin_auth:` module).
+#[test]
+fn non_matching_credentials_of_any_shape_never_identify() {
+    let h = hash("the-real-admin-token");
+    for cred in [
+        "",
+        "\0\x01\x02\x7f-random-bytes-ish",
+        "a.b",
+        "a.b.c.d",
+        "aaa.bbb.ccc",
+        "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJvcGVyYXRvciJ9.c2ln",
+        "not-a-jwt-at-all-just-plain-text",
+        "not base64!!! ####",
+        "eyJhbGciOiJub25lIn0..",
+        "the-real-admin-token-but-longer",
+        "the-real-admin-toke",
+        "the-real-admin-tokfn",
+    ] {
+        for (bearer, header) in [
+            (Some(cred), None),
+            (None, Some(cred)),
+            (Some(cred), Some(cred)),
+        ] {
+            assert_eq!(
+                fold(&h, bearer, header),
+                Verdict::Reject,
+                "a non-matching presented credential must stop the chain: {cred:?}"
+            );
+        }
+    }
+    let h = hash("secret");
+    assert_eq!(fold(&h, Some("wrong"), Some("a.b.c")), Verdict::Reject);
+    assert_eq!(fold(&h, Some("a.b.c"), Some("wrong")), Verdict::Reject);
+}
+
+/// A Bearer whose value is not header text (`to_str` fails) presents nothing, as 1.5.5 read it.
+#[test]
+fn a_bearer_that_is_not_header_text_is_absent_as_in_1_5_5() {
+    for value in [
+        "Bearer t\u{f6}k\u{e9}n".as_bytes(),
+        b"Bearer tok\x01en",
+        b"Bearer tok\x7fen",
+    ] {
+        assert_eq!(bearer_line(value), None, "{value:?} presents no Bearer");
+    }
+    assert_eq!(bearer_line(b"Bearer tok\ten"), Some("tok\ten"));
+    assert_eq!(bearer_line(b"bearer the-token"), Some("the-token"));
 }
