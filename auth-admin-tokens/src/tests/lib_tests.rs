@@ -826,7 +826,10 @@ mod reentrant_refresh_subscriber {
             (&b"Bearer wrong-token"[..], None, auth::VERDICT_REJECT),
         ] {
             OBSERVED.with(|seen| seen.borrow_mut().clear());
-            let dispatcher = Dispatcher::new(DispatchConfig::default());
+            let dispatcher = Dispatcher::new(
+                DispatchConfig::default(),
+                busbar_contract::services::test_caller_binding(),
+            );
             let bind = Bind {
                 instance: "admin-reentrant-refresh".into(),
                 max_inflight_cap: 64,

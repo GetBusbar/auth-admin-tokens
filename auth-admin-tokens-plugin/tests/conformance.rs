@@ -6,7 +6,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use busbar_auth_admin_tokens::{ADMIN_TOKEN_HEADER, AUTHORIZATION_HEADER};
+const ADMIN_TOKEN_HEADER: &str = "x-admin-token";
+const AUTHORIZATION_HEADER: &str = "authorization";
 use busbar_contract::abi::auth::AuthPoint;
 use busbar_contract::auth_calls::{Verified, VerifyAnswer, VerifyRequest};
 use busbar_contract::sha256_hex;
@@ -67,10 +68,9 @@ fn cdylib() -> Vec<u8> {
 /// The door's own Statement rendering, as the lower-case hex a signed manifest carries (the
 /// manifest's `statement` field).
 fn rendering_hex() -> String {
-    let rendering =
-        busbar_plugin_loader::dispatch::LinkedRow::of(busbar_auth_admin_tokens::door::door)
-            .expect("the door states itself")
-            .statement;
+    let rendering = busbar_plugin_loader::dispatch::LinkedRow::of(busbar_auth_admin_tokens::door)
+        .expect("the door states itself")
+        .statement;
     rendering.iter().map(|b| format!("{b:02x}")).collect()
 }
 
@@ -103,7 +103,7 @@ fn linked() -> PluginRegistry {
     PluginRegistry::empty()
         .link(vec![LinkedPlugin::door(
             statement(),
-            busbar_auth_admin_tokens::door::door,
+            busbar_auth_admin_tokens::door,
         )])
         .expect("the linked door admits the plugin")
 }
@@ -150,12 +150,15 @@ fn dropped(tag: &str, lib: &[u8], signer: &SigningKey) -> PluginRegistry {
 /// The process's dispatcher, as the composition root builds one: lent a seal, so a verify reveals
 /// the credential lines it lends the door.
 fn dispatcher() -> Arc<Dispatcher> {
-    let d = Dispatcher::new(DispatchConfig {
-        workers: 2,
-        budgets: Budgets::default(),
-        watchdog_period: Duration::from_millis(20),
-        ..Default::default()
-    });
+    let d = Dispatcher::new(
+        DispatchConfig {
+            workers: 2,
+            budgets: Budgets::default(),
+            watchdog_period: Duration::from_millis(20),
+            ..Default::default()
+        },
+        busbar_contract::services::test_caller_binding(),
+    );
     assert!(d.lend_seal(busbar_contract::plugin::TestKernelSeal));
     Arc::new(d)
 }
@@ -373,7 +376,7 @@ async fn published_auth_cases_match_through_both_real_doors() {
 #[test]
 fn the_declared_needs_are_the_statements() {
     let stated =
-        busbar_plugin_loader::dispatch::rendering_of(busbar_auth_admin_tokens::door::door).unwrap();
+        busbar_plugin_loader::dispatch::rendering_of(busbar_auth_admin_tokens::door).unwrap();
     let facts = busbar_contract::abi::mechanism::rendering::read(&stated).unwrap();
     assert!(facts.needs.is_empty(), "admin tokens requires no connector");
     let declared: serde_json::Value =

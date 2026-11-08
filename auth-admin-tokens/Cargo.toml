@@ -26,9 +26,10 @@ tracing = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
+busbar-contract = { workspace = true, features = ["test-seal"] }
 jsonschema = { workspace = true }
 
-busbar-plugin-loader = { workspace = true }
+busbar-plugin-loader = { workspace = true, features = ["test-support"] }
 tracing-subscriber = { workspace = true, features = ["fmt"] }
 # The settings tests check the hand decoder against a real JSON parser.
 serde_json = { workspace = true }

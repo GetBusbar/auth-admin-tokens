@@ -37,16 +37,16 @@ use zeroize::Zeroizing;
 /// The fixed principal id the operator admin token identifies as. The built-in operator credential
 /// carries FULL admin scope by definition (it is the root credential the deployment was born with);
 /// group-mapped external principals get their scope from `group_map:` instead.
-pub const ADMIN_TOKENS_PRINCIPAL_ID: &str = "admin";
+pub(crate) const ADMIN_TOKENS_PRINCIPAL_ID: &str = "admin";
 
 /// The module name: the `admin_auth:` chain entry this module answers.
-pub const ADMIN_TOKENS_MODULE_NAME: &str = "admin-tokens";
+pub(crate) const ADMIN_TOKENS_MODULE_NAME: &str = "admin-tokens";
 
 /// The second carrier the operator token may arrive on (lower-case); the first is the Bearer.
-pub const ADMIN_TOKEN_HEADER: &str = "x-admin-token";
+pub(crate) const ADMIN_TOKEN_HEADER: &str = "x-admin-token";
 
 /// The line the Bearer arrives on (lower-case), as `Bearer <token>`.
-pub const AUTHORIZATION_HEADER: &str = "authorization";
+pub(crate) const AUTHORIZATION_HEADER: &str = "authorization";
 
 /// The length of a SHA-256 digest in hex: the configured digest's, and each presented token's.
 const DIGEST_HEX_LEN: usize = 64;
@@ -161,12 +161,13 @@ fn carrier_matches(
 }
 
 /// The refusal of settings that are not a digest. It never echoes what it was given.
-pub const NOT_A_DIGEST: &str = "settings: must be the admin token's SHA-256 digest as 64 hex \
+pub(crate) const NOT_A_DIGEST: &str =
+    "settings: must be the admin token's SHA-256 digest as 64 hex \
                                 characters (the value is not echoed)";
 
 /// The refusal of the digest of an empty token: a blank admin token is refused. It never echoes
 /// what it was given.
-pub const EMPTY_TOKEN: &str = "settings: is the SHA-256 digest of an empty token, which is \
+pub(crate) const EMPTY_TOKEN: &str = "settings: is the SHA-256 digest of an empty token, which is \
                                refused (the value is not echoed)";
 
 /// SHA-256 of the empty string: the digest of a blank admin token.
@@ -182,7 +183,7 @@ const EMPTY_TOKEN_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b93
 ///
 /// # Errors
 /// [`NOT_A_DIGEST`]; [`EMPTY_TOKEN`] for the digest of an empty token.
-pub fn digest_of(settings: &[u8]) -> Result<Zeroizing<String>, &'static str> {
+pub(crate) fn digest_of(settings: &[u8]) -> Result<Zeroizing<String>, &'static str> {
     let text = settings_text(settings).ok_or(NOT_A_DIGEST)?;
     let digest = text.trim();
     if digest.len() != DIGEST_HEX_LEN || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -297,7 +298,7 @@ fn note_no_token(line: &str) {
 /// replaced or dropped digest is zeroed.
 ///
 /// `Debug` is implemented by hand and never prints the digest.
-pub struct AdminTokens {
+pub(crate) struct AdminTokens {
     configured_hash: std::sync::RwLock<Zeroizing<String>>,
 }
 
@@ -390,14 +391,14 @@ const CARRIERS: &[MarkWord] = &[carrier(AUTHORIZATION_HEADER), carrier(ADMIN_TOK
 const TAIL: &AuthTail = &with_operator(verify_tail(0, AuthPoints::HEAD), ADMIN_TOKENS_PRINCIPAL_ID);
 
 /// The concurrency the plugin states it serves.
-pub const CONCURRENCY: u32 = 1024;
+pub(crate) const CONCURRENCY: u32 = 1024;
 
 /// JSON Schema for the lifecycle settings document, embedded in the signed Statement.
 const SETTINGS_SCHEMA: &[u8] = include_bytes!("../settings.schema.json");
 
 /// What the plugin states: its name, version, the concurrency it serves ([`CONCURRENCY`]: a pure
 /// compare holding only the rotatable digest, like the other verifiers) and its two carriers.
-pub const STATEMENT: Statement = with_tail(
+pub(crate) const STATEMENT: Statement = with_tail(
     Statement {
         settings_schema: busbar_contract::abi::mechanism::call::Blob::json(SETTINGS_SCHEMA),
         mark_words: CARRIERS.as_ptr(),
@@ -413,7 +414,7 @@ pub const STATEMENT: Statement = with_tail(
 
 /// The door: `door::door`, the plugin's `DoorFn`. A build that links this crate registers it as the
 /// `admin-tokens` row; `busbar-auth-admin-tokens-plugin` exports it as `busbar_plugin_door`.
-pub mod door {
+mod door {
     busbar_contract::auth_verify_door!(super::AdminTokens, super::STATEMENT);
 }
 
@@ -423,3 +424,6 @@ mod tests;
 
 #[cfg(test)]
 mod settings_schema_tests;
+
+/// The plugin ABI entry and generated registration constant.
+pub use door::{door, MACRO_DOOR};

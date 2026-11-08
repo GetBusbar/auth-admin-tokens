@@ -2,17 +2,17 @@
 // Copyright (C) 2026 Busbar Inc and contributors
 
 //! The `admin-tokens` admin-auth module as a droppable `kind: auth` plugin: the logic crate
-//! re-exported whole, and its door (`busbar_auth_admin_tokens::door::door`) exported as this image's
+//! exposes only its ABI entry, and its door (`busbar_auth_admin_tokens::door`) exported as this image's
 //! ONE symbol, `busbar_plugin_door` (`export_door!`). The logic crate holds no `unsafe` and exports
 //! nothing, so a build that links it carries no door symbol.
 
 #![deny(unsafe_code)]
 #![deny(missing_docs)]
 
-pub use busbar_auth_admin_tokens::*;
+pub use busbar_auth_admin_tokens::{door, MACRO_DOOR};
 
 /// The exported door: the macro's `#[no_mangle]` symbol is the one exemption.
 #[allow(unsafe_code)]
 mod exported {
-    busbar_contract::export_door!(busbar_auth_admin_tokens::door::door);
+    busbar_contract::export_door!(busbar_auth_admin_tokens::door);
 }

@@ -6,7 +6,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use busbar_auth_admin_tokens::{ADMIN_TOKENS_PRINCIPAL_ID, ADMIN_TOKEN_HEADER};
+const ADMIN_TOKENS_PRINCIPAL_ID: &str = "admin";
+const ADMIN_TOKEN_HEADER: &str = "x-admin-token";
 use busbar_contract::abi::auth::AuthPoint;
 use busbar_contract::auth_calls::{AuthCalls, Verified, VerifyAnswer, VerifyRequest};
 use busbar_contract::sha256_hex;
@@ -51,15 +52,18 @@ fn opened() -> Arc<dyn AuthCalls> {
     let registry = PluginRegistry::empty()
         .link(vec![LinkedPlugin::door(
             statement(),
-            busbar_auth_admin_tokens::door::door,
+            busbar_auth_admin_tokens::door,
         )])
         .expect("the linked door admits the plugin");
-    let dispatcher = Dispatcher::new(DispatchConfig {
-        workers: 2,
-        budgets: Budgets::default(),
-        watchdog_period: Duration::from_millis(20),
-        ..Default::default()
-    });
+    let dispatcher = Dispatcher::new(
+        DispatchConfig {
+            workers: 2,
+            budgets: Budgets::default(),
+            watchdog_period: Duration::from_millis(20),
+            ..Default::default()
+        },
+        busbar_contract::services::test_caller_binding(),
+    );
 
     assert!(dispatcher.lend_seal(busbar_contract::plugin::TestKernelSeal));
     let dispatcher = Arc::new(dispatcher);

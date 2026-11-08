@@ -64,14 +64,14 @@ fn bind(d: &Dispatcher) -> Bind {
 }
 
 fn linked(d: &Dispatcher) -> Plugin<Auth> {
-    let row = LinkedRow::of(busbar_auth_admin_tokens::door::door).expect("the door states itself");
+    let row = LinkedRow::of(busbar_auth_admin_tokens::door).expect("the door states itself");
     load_linked::<Auth>(&row, bind(d)).expect("the linked door loads")
 }
 
 fn dropped(d: &Dispatcher) -> Plugin<Auth> {
     let path = cdylib_path();
     let stated =
-        rendering_of(busbar_auth_admin_tokens::door::door).expect("the door renders its Statement");
+        rendering_of(busbar_auth_admin_tokens::door).expect("the door renders its Statement");
     load_dropped::<Auth>(&path, &stated, bind(d)).expect("the dropped door loads")
 }
 
@@ -89,11 +89,10 @@ fn checked_call<
     slot: u32,
     frame: &mut Frame<I, O>,
 ) -> busbar_plugin_loader::dispatch::Called {
-    use std::sync::atomic::Ordering::SeqCst;
     let expected = u64::from(p.is_open() || matches!(slot, life::OPEN | life::VALIDATE));
-    let before = (p.inner.crossings.load(SeqCst), p.inner.resumes.load(SeqCst));
+    let before = (p.test_invocations().0, p.test_invocations().1);
     let answer = p.call(slot, frame);
-    let after = (p.inner.crossings.load(SeqCst), p.inner.resumes.load(SeqCst));
+    let after = (p.test_invocations().0, p.test_invocations().1);
     assert_eq!(
         (after.0 - before.0, after.1 - before.1),
         (expected, 0),
@@ -227,17 +226,14 @@ const EXPECTED: &[&str] = &[
 
 #[test]
 fn refresh_picks_up_a_rotated_digest_without_a_reopen() {
-    let d = Dispatcher::new(DispatchConfig::default());
+    let d = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
     for p in [linked(&d), dropped(&d)] {
         assert_eq!(script(&p), EXPECTED);
-        assert_eq!(
-            p.inner.crossings.load(std::sync::atomic::Ordering::Relaxed),
-            12
-        );
-        assert_eq!(
-            p.inner.resumes.load(std::sync::atomic::Ordering::Relaxed),
-            0
-        );
+        assert_eq!(p.test_invocations().0, 12);
+        assert_eq!(p.test_invocations().1, 0);
     }
 }
 
@@ -262,7 +258,10 @@ fn lifecycle_and_short_identity_contract_through_both_real_doors() {
     };
     use busbar_contract::abi::mechanism::call::{InHead, OutHead};
     use busbar_contract::abi::mechanism::lifecycle::{TickIn, TickOut, ValidateIn};
-    let d = Dispatcher::new(DispatchConfig::default());
+    let d = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
     for p in [linked(&d), dropped(&d)] {
         assert!(
             !bearer(&p, OLD).starts_with("Ready"),
@@ -434,14 +433,8 @@ fn lifecycle_and_short_identity_contract_through_both_real_doors() {
             !bearer(&p, OLD).starts_with("Ready"),
             "closed cannot verify"
         );
-        assert_eq!(
-            p.inner.crossings.load(std::sync::atomic::Ordering::Relaxed),
-            17
-        );
-        assert_eq!(
-            p.inner.resumes.load(std::sync::atomic::Ordering::Relaxed),
-            0
-        );
+        assert_eq!(p.test_invocations().0, 17);
+        assert_eq!(p.test_invocations().1, 0);
     }
 }
 
@@ -478,9 +471,12 @@ fn real_auth_door_metadata_and_ready_failures_are_refused() {
         KindCode,
     };
     use busbar_plugin_loader::dispatch::LoadError;
-    let real = busbar_auth_admin_tokens::door::door().parts();
-    let d = Dispatcher::new(DispatchConfig::default());
-    let stated = rendering_of(busbar_auth_admin_tokens::door::door).unwrap();
+    let real = busbar_auth_admin_tokens::door().parts();
+    let d = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
+    let stated = rendering_of(busbar_auth_admin_tokens::door).unwrap();
     let path = cdylib_path();
     // SAFETY: this fresh actual product image exports the documented raw door symbol. The
     // library stays alive while its address and Statement are inspected.
@@ -489,7 +485,7 @@ fn real_auth_door_metadata_and_ready_failures_are_refused() {
         unsafe { library.get(b"busbar_plugin_door\0") }.unwrap();
     assert_ne!(
         *symbol as usize,
-        busbar_auth_admin_tokens::door::door as *const () as usize,
+        busbar_auth_admin_tokens::door as *const () as usize,
         "dropped tests must use another image"
     );
     let dropped_parts = unsafe { Door::read_parts(symbol()) };
@@ -544,8 +540,8 @@ fn real_auth_door_metadata_and_ready_failures_are_refused() {
         assert_eq!(load_linked::<Auth>(&row, bind(&d)).err(), Some(refusal));
     }
     {
-        use busbar_plugin_loader::dispatch::kinds::store::Store;
-        let row = LinkedRow::of(busbar_auth_admin_tokens::door::door).unwrap();
+        use busbar_plugin_loader::dispatch::kinds::store_v4::StoreV4 as Store;
+        let row = LinkedRow::of(busbar_auth_admin_tokens::door).unwrap();
         assert_eq!(
             load_linked::<Store>(&row, bind(&d)).err(),
             Some(LoadError::ManifestKind {
@@ -563,7 +559,7 @@ fn real_auth_door_metadata_and_ready_failures_are_refused() {
     }
     {
         use busbar_plugin_loader::dispatch::kinds::secret::Secret;
-        let row = LinkedRow::of(busbar_auth_admin_tokens::door::door).unwrap();
+        let row = LinkedRow::of(busbar_auth_admin_tokens::door).unwrap();
         assert_eq!(
             load_linked::<Secret>(&row, bind(&d)).err(),
             Some(LoadError::ManifestKind {
@@ -581,7 +577,7 @@ fn real_auth_door_metadata_and_ready_failures_are_refused() {
     }
     {
         use busbar_plugin_loader::dispatch::kinds::hook::Hook;
-        let row = LinkedRow::of(busbar_auth_admin_tokens::door::door).unwrap();
+        let row = LinkedRow::of(busbar_auth_admin_tokens::door).unwrap();
         assert_eq!(
             load_linked::<Hook>(&row, bind(&d)).err(),
             Some(LoadError::ManifestKind {
@@ -599,7 +595,7 @@ fn real_auth_door_metadata_and_ready_failures_are_refused() {
     }
     {
         use busbar_plugin_loader::dispatch::kinds::export::Export;
-        let row = LinkedRow::of(busbar_auth_admin_tokens::door::door).unwrap();
+        let row = LinkedRow::of(busbar_auth_admin_tokens::door).unwrap();
         assert_eq!(
             load_linked::<Export>(&row, bind(&d)).err(),
             Some(LoadError::ManifestKind {
@@ -617,7 +613,7 @@ fn real_auth_door_metadata_and_ready_failures_are_refused() {
     }
     {
         use busbar_plugin_loader::dispatch::kinds::plane::Plane;
-        let row = LinkedRow::of(busbar_auth_admin_tokens::door::door).unwrap();
+        let row = LinkedRow::of(busbar_auth_admin_tokens::door).unwrap();
         assert_eq!(
             load_linked::<Plane>(&row, bind(&d)).err(),
             Some(LoadError::ManifestKind {
@@ -635,7 +631,7 @@ fn real_auth_door_metadata_and_ready_failures_are_refused() {
     }
     {
         use busbar_plugin_loader::dispatch::kinds::transport::Transport;
-        let row = LinkedRow::of(busbar_auth_admin_tokens::door::door).unwrap();
+        let row = LinkedRow::of(busbar_auth_admin_tokens::door).unwrap();
         assert_eq!(
             load_linked::<Transport>(&row, bind(&d)).err(),
             Some(LoadError::ManifestKind {
@@ -713,7 +709,7 @@ fn real_auth_door_metadata_and_ready_failures_are_refused() {
 }
 
 extern "C" fn raw_product_door() -> *const busbar_contract::abi::mechanism::door::Door {
-    busbar_auth_admin_tokens::door::door()
+    busbar_auth_admin_tokens::door()
 }
 extern "C" fn raw_mutated_door() -> *const busbar_contract::abi::mechanism::door::Door {
     mutated_door()
@@ -724,7 +720,10 @@ extern "C" fn raw_mutated_door() -> *const busbar_contract::abi::mechanism::door
 #[test]
 fn all_published_cases_preserve_raw_abi_properties_and_exact_crossings() {
     let inputs: serde_json::Value = serde_json::from_str(include_str!("conformance.json")).unwrap();
-    let d = Dispatcher::new(DispatchConfig::default());
+    let d = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
     let mut doors = Vec::new();
     for p in [linked(&d), dropped(&d)] {
         assert_eq!(
@@ -797,8 +796,7 @@ fn all_published_cases_preserve_raw_abi_properties_and_exact_crossings() {
 }
 
 fn product_counts(p: &Plugin<Auth>) -> (u64, u64) {
-    use std::sync::atomic::Ordering::SeqCst;
-    (p.inner.crossings.load(SeqCst), p.inner.resumes.load(SeqCst))
+    (p.test_invocations().0, p.test_invocations().1)
 }
 
 fn raw_published_case(

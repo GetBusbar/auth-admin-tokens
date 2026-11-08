@@ -3,7 +3,10 @@
 
 //! The settings-only VALIDATE crossing used by --validate, before OPEN, through both real doors.
 
-use busbar_auth_admin_tokens::{EMPTY_TOKEN, NOT_A_DIGEST};
+const EMPTY_TOKEN: &str = "settings: is the SHA-256 digest of an empty token, which is \
+                               refused (the value is not echoed)";
+const NOT_A_DIGEST: &str = "settings: must be the admin token's SHA-256 digest as 64 hex \
+                                characters (the value is not echoed)";
 use busbar_contract::abi::mechanism::call::Outcome;
 use busbar_contract::abi::mechanism::{
     call::{Blob, InHead, OutHead, BLOB_JSON},
@@ -36,7 +39,10 @@ fn validate_refuses_every_invalid_digest_before_open_and_keeps_the_error_safe() 
     ];
     for dropped in [false, true] {
         let leg = if dropped { "dropped" } else { "linked" };
-        let dispatcher = Dispatcher::new(DispatchConfig::default());
+        let dispatcher = Dispatcher::new(
+            DispatchConfig::default(),
+            busbar_contract::services::test_caller_binding(),
+        );
         let bind = Bind {
             instance: "admin-settings-validation".into(),
             max_inflight_cap: 64,
@@ -55,12 +61,12 @@ fn validate_refuses_every_invalid_digest_before_open_and_keeps_the_error_safe() 
             );
             load_dropped::<Auth>(
                 &path,
-                &rendering_of(busbar_auth_admin_tokens::door::door).unwrap(),
+                &rendering_of(busbar_auth_admin_tokens::door).unwrap(),
                 bind,
             )
         } else {
             load_linked::<Auth>(
-                &LinkedRow::of(busbar_auth_admin_tokens::door::door).unwrap(),
+                &LinkedRow::of(busbar_auth_admin_tokens::door).unwrap(),
                 bind,
             )
         }
@@ -80,20 +86,8 @@ fn validate_refuses_every_invalid_digest_before_open_and_keeps_the_error_safe() 
         assert_eq!(validate(&plugin, valid).outcome, Outcome::Ready);
         assert_eq!(open(&plugin, valid).outcome, Outcome::Ready);
         assert_eq!(close(&plugin).outcome, Outcome::Ready);
-        assert_eq!(
-            plugin
-                .inner
-                .crossings
-                .load(std::sync::atomic::Ordering::Relaxed),
-            16
-        );
-        assert_eq!(
-            plugin
-                .inner
-                .resumes
-                .load(std::sync::atomic::Ordering::Relaxed),
-            0
-        );
+        assert_eq!(plugin.test_invocations().0, 16);
+        assert_eq!(plugin.test_invocations().1, 0);
     }
 }
 
@@ -150,6 +144,5 @@ fn close(p: &Plugin<Auth>) -> Called {
     answer
 }
 fn plugin_counts(p: &Plugin<Auth>) -> (u64, u64) {
-    use std::sync::atomic::Ordering::SeqCst;
-    (p.inner.crossings.load(SeqCst), p.inner.resumes.load(SeqCst))
+    (p.test_invocations().0, p.test_invocations().1)
 }
