@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2026 Busbar Inc and contributors
 
-//! Tests for `crates/auth-admin-tokens/src/lib.rs`.
+//! Tests for `auth-admin-tokens/src/lib.rs`.
 
 use super::*;
 use busbar_contract::sha256_hex;
@@ -376,7 +376,7 @@ fn an_admin_token_never_appears_in_logs_or_errors() {
 /// the rotatable digest, as webhook-signature, sigv4 and oauth do.
 #[test]
 fn statement_concurrency_is_1024() {
-    assert_eq!(STATEMENT.max_inflight, 1024);
+    assert_eq!(STATEMENT.max_inflight, CONCURRENCY);
 }
 
 /// A settings refusal is a line in the contract's instance-relative form (`settings: <reason>`), so
