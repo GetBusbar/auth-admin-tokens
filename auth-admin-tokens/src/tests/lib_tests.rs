@@ -804,9 +804,9 @@ mod reentrant_refresh_subscriber {
         fn reload(&self, settings: &[u8], secrets: &[&[u8]]) -> Result<u64, Refusal> {
             self.0.reload(settings, secrets)
         }
-        fn verify(&self, request: &VerifyView<'_>) -> Answer {
+        fn verify_ticketed(&self, request: &VerifyView<'_>, op: &VerifyOp) -> Poll<Answer> {
             tracing::subscriber::with_default(RefreshOnEvent(self.0.clone()), || {
-                self.0.verify(request)
+                self.0.verify_ticketed(request, op)
             })
         }
     }

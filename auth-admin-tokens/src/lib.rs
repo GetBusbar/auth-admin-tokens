@@ -26,12 +26,13 @@ use busbar_contract::abi::auth::{AuthPoints, AuthTail};
 use busbar_contract::abi::mechanism::door::{MarkWord, Statement};
 use busbar_contract::abi::sdk::auth_door::{
     carrier, verify_tail, with_operator, with_tail, Answer, Strip, Verdict, VerifiedIdentity,
-    VerifyPlugin, VerifyView,
+    VerifyOp, VerifyPlugin, VerifyView,
 };
 use busbar_contract::abi::sdk::door::statement;
 use busbar_contract::abi::sdk::hmac::sha256;
 use busbar_contract::abi::sdk::life::Refusal;
 use busbar_contract::constant_time_eq;
+use std::task::Poll;
 use zeroize::Zeroizing;
 
 /// The fixed principal id the operator admin token identifies as. The built-in operator credential
@@ -358,7 +359,7 @@ impl VerifyPlugin for AdminTokens {
     /// fold in one call, so the fold is the module's own: a carrier sent on more than one line
     /// matches only if every copy does. Whatever the verdict, both lines are named for the transport
     /// to strip: they are this module's credential lines.
-    fn verify(&self, request: &VerifyView<'_>) -> Answer {
+    fn verify_ticketed(&self, request: &VerifyView<'_>, _op: &VerifyOp) -> Poll<Answer> {
         // Release the lock before parsing carriers or invoking arbitrary tracing subscribers.
         let digest: Zeroizing<String> = self.digest().clone();
         let mut bearers = Vec::new();
@@ -371,13 +372,13 @@ impl VerifyPlugin for AdminTokens {
             }
         }
         let verdict = judge(digest.as_str(), &bearers, &headers, token_matches);
-        Answer {
+        Poll::Ready(Answer {
             strips: vec![
                 Strip::field(AUTHORIZATION_HEADER),
                 Strip::field(ADMIN_TOKEN_HEADER),
             ],
             ..verdict.into()
-        }
+        })
     }
 }
 

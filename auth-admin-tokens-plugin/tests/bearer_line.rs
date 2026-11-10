@@ -69,7 +69,11 @@ fn opened() -> Arc<dyn AuthCalls> {
     let dispatcher = Arc::new(dispatcher);
     let digest = sha256_hex(TOKEN.as_bytes());
     AuthRows::new(Arc::new(registry), dispatcher)
-        .open("admin-tokens", "admin-tokens", &serde_json::json!(digest))
+        .open(
+            "admin-tokens",
+            "admin-tokens",
+            &serde_json::json!(digest).into(),
+        )
         .expect("the plugin opens over a digest")
 }
 

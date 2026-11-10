@@ -208,7 +208,11 @@ async fn transcript(registry: PluginRegistry, digest: &str) -> serde_json::Value
     };
     let rows = AuthRows::new(registry.clone(), dispatcher());
     let opened = rows
-        .open("admin-tokens", "admin-tokens", &serde_json::json!(digest))
+        .open(
+            "admin-tokens",
+            "admin-tokens",
+            &serde_json::json!(digest).into(),
+        )
         .expect("the plugin opens over a digest");
     let mut now = Vec::new();
     let mut submitted = Vec::new();
@@ -224,7 +228,7 @@ async fn transcript(registry: PluginRegistry, digest: &str) -> serde_json::Value
         .open(
             "admin-tokens",
             "admin-tokens",
-            &serde_json::json!("the-raw-token"),
+            &serde_json::json!("the-raw-token").into(),
         )
         .err();
     serde_json::json!({
@@ -312,12 +316,12 @@ async fn published_auth_cases_match_through_both_real_doors() {
         let settings: serde_json::Value =
             serde_json::from_str(inputs["settings"].as_str().unwrap()).unwrap();
         let opened = rows
-            .open("admin-tokens", "admin-tokens", &settings)
+            .open("admin-tokens", "admin-tokens", &settings.into())
             .unwrap();
         let rotated_settings: serde_json::Value =
             serde_json::from_str(inputs["auth"]["rotated_settings"].as_str().unwrap()).unwrap();
         let rotated = rows
-            .open("admin-tokens", "rotated-admin", &rotated_settings)
+            .open("admin-tokens", "rotated-admin", &rotated_settings.into())
             .unwrap();
         for case in inputs["auth"]["cases"].as_array().unwrap() {
             let presented = || {
