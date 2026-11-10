@@ -197,14 +197,15 @@ pub(crate) fn digest_of(settings: &[u8]) -> Result<Zeroizing<String>, &'static s
 }
 
 /// The text of the settings document, which must be exactly one JSON string (RFC 8259) with only
-/// JSON whitespace around it, decoded into a wiping buffer. The buffer is reserved at the
-/// document's length up front, and a decoded character is never longer than its encoding, so it is
-/// never reallocated and no unwiped copy is left behind.
+/// JSON whitespace around it, decoded into a wiping buffer. The buffer is reserved at the inner
+/// string body's length up front, and a decoded character is never longer than its encoding, so
+/// it is never reallocated and no unwiped copy is left behind.
 ///
-/// Only what a digest document can hold is decoded: whitespace and hex digits, raw or escaped
-/// (`\t`, `\n`, `\r`, `\f`, `\uXXXX`). Any other character, escape or code point (`\"`, `\\`, `\/`,
-/// `\b`, a surrogate, a raw control character) is refused (`None`): it could never be part of a
-/// digest, so the refusal is the one [`digest_of`] would reach anyway.
+/// Only what a digest document can hold is decoded: Unicode whitespace
+/// (`char::is_whitespace`) and hex digits, raw or escaped (`\t`, `\n`, `\r`, `\f`, `\uXXXX`).
+/// Any other character, escape or code point (`\"`, `\\`, `\/`, `\b`, a surrogate, a raw control
+/// character) is refused (`None`): it could never be part of a digest, so the refusal is the one
+/// [`digest_of`] would reach anyway.
 fn settings_text(settings: &[u8]) -> Option<Zeroizing<String>> {
     let document = std::str::from_utf8(settings).ok()?;
     let body = document
